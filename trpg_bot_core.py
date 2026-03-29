@@ -33,27 +33,26 @@ OUTPUT_CHANNEL_ID = int(os.environ["OUTPUT_CHANNEL_ID"])
 def search_scenario_info(title: str) -> dict:
     """
     Claude Sonnet 4.6 + web_search ツールを使い、
-    シナリオ提供元URL とトレーラー画像URL を返す。
-
-    返却例:
-        {
-            "title": "クトゥルフの呼び声",
-            "url":   "https://booth.pm/ja/items/xxxxxx",
-            "image": "https://example.com/trailer.jpg",
-            "description": "シナリオの短い説明文"
-        }
+    シナリオ詳細情報を返す。
     """
     prompt = f"""
 以下のTRPGシナリオタイトルについて、Web検索で情報を調べてください。
 
 タイトル: {title}
 
-以下の情報をJSON形式のみで返答してください（前置き・説明文・コードブロック不要）:
+以下の情報をJSON形式のみで返答してください（前置き・説明文・コードブロック不要）。
+情報が見つからない項目は "不明" としてください。
+
 {{
   "title": "タイトル（正式名称）",
-  "url": "シナリオ配布・販売ページのURL（BOOTH / DLsite / itch.io / 公式サイト など）",
+  "url": "シナリオ配布・販売ページのURL（BOOTH / DLsite / itch.io / 公式サイト など。見つからない場合はnull）",
   "image": "トレーラー画像またはシナリオ表紙画像のURL（見つからない場合はnull）",
-  "description": "シナリオの短い説明（1〜2文、日本語で）"
+  "author": "作者名（見つからない場合は「不明」）",
+  "players": "プレイ人数（例：「1人」「2〜4人」。見つからない場合は「不明」）",
+  "playtime": "プレイ時間（例：「2〜3時間」。見つからない場合は「不明」）",
+  "difficulty": "難易度（「高」「中」「低」のいずれか。判断できない場合は「不明」）",
+  "edition": "版（例：「CoC6版」「CoC7版」「SW2.5」。見つからない場合は「不明」）",
+  "summary": "ネタバレなしのシナリオ概要（舞台・雰囲気を2〜3文で。日本語で）"
 }}
 """
 
@@ -88,7 +87,12 @@ def search_scenario_info(title: str) -> dict:
         "title": title,
         "url": None,
         "image": None,
-        "description": "情報を取得できませんでした。",
+        "author": "不明",
+        "players": "不明",
+        "playtime": "不明",
+        "difficulty": "不明",
+        "edition": "不明",
+        "summary": "情報を取得できませんでした。",
     }
 
 
@@ -99,17 +103,28 @@ async def post_result(channel: discord.TextChannel, info: dict) -> None:
     embed = discord.Embed(
         title=info.get("title", "不明"),
         url=info.get("url") or None,
-        description=info.get("description", ""),
         color=0x7B68EE,  # ミディアムスレートブルー
     )
 
+    # トレーラー・表紙画像
     if info.get("image"):
         embed.set_image(url=info["image"])
 
+    # 各項目をフィールドで表示
+    embed.add_field(name="作者",       value=info.get("author",     "不明"), inline=True)
+    embed.add_field(name="プレイ人数", value=info.get("players",    "不明"), inline=True)
+    embed.add_field(name="プレイ時間", value=info.get("playtime",   "不明"), inline=True)
+    embed.add_field(name="難易度",     value=info.get("difficulty", "不明"), inline=True)
+    embed.add_field(name="版",         value=info.get("edition",    "不明"), inline=True)
+
+    # 提供元URL
     if info.get("url"):
         embed.add_field(name="🔗 シナリオ提供元", value=info["url"], inline=False)
     else:
-        embed.add_field(name="⚠️ 提供元URL", value="見つかりませんでした", inline=False)
+        embed.add_field(name="🔗 シナリオ提供元", value="不明", inline=False)
+
+    # シナリオ概要
+    embed.add_field(name="シナリオ概要", value=info.get("summary", "不明"), inline=False)
 
     embed.set_footer(text="Powered by Claude Sonnet 4.6 + Web Search")
 
