@@ -151,8 +151,8 @@ async def on_message(message: discord.Message):
             loop = asyncio.get_event_loop()
             info = await loop.run_in_executor(None, search_scenario_info, title)
             await post_result(output_channel, info)
-            # API負荷軽減のため少し待機
-            await asyncio.sleep(2.0)
+            # API負荷軽減のため待機
+            await asyncio.sleep(60.0)
         except Exception as e:
             print(f"[ERROR] '{title}' の処理中にエラー: {e}")
             await output_channel.send(f"⚠️ {title}：検索失敗")
