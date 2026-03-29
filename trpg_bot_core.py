@@ -1,36 +1,38 @@
 """
-TRPG シナリオ検索Bot - コアロジックサンプル
+TRPG シナリオ検索Bot - コアロジック
 ----------------------------------------------
 必要なパッケージ:
-    pip install discord.py openai
+    pip install discord.py anthropic
 
-環境変数（.envなどで管理）:
+環境変数（Railwayの Variables に設定）:
     DISCORD_TOKEN      : Discord BotのToken
-    OPENAI_API_KEY     : OpenAI APIキー
+    ANTHROPIC_API_KEY  : AnthropicのAPIキー
     SOURCE_CHANNEL_ID  : タイトルリストを投稿するチャンネルID
     OUTPUT_CHANNEL_ID  : 検索結果を投稿するチャンネルID
 """
 
 import os
+import json
+import re
 import asyncio
 import discord
-from openai import AsyncOpenAI
+import anthropic
 
 # ── クライアント初期化 ──────────────────────────────────────────
 intents = discord.Intents.default()
 intents.message_content = True  # メッセージ内容の読み取りに必要
 
-discord_client = discord.Client(intents=intents)
-openai_client  = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+discord_client   = discord.Client(intents=intents)
+anthropic_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 SOURCE_CHANNEL_ID = int(os.environ["SOURCE_CHANNEL_ID"])
 OUTPUT_CHANNEL_ID = int(os.environ["OUTPUT_CHANNEL_ID"])
 
 
-# ── OpenAI Web検索でシナリオ情報を取得 ────────────────────────────
-async def search_scenario_info(title: str) -> dict:
+# ── Claude Web検索でシナリオ情報を取得 ────────────────────────────
+def search_scenario_info(title: str) -> dict:
     """
-    GPT-4o + web_search_preview を使い、
+    Claude Sonnet 4.6 + web_search ツールを使い、
     シナリオ提供元URL とトレーラー画像URL を返す。
 
     返却例:
@@ -46,34 +48,40 @@ async def search_scenario_info(title: str) -> dict:
 
 タイトル: {title}
 
-以下の情報をJSON形式のみで返答してください（余分なテキスト不要）:
+以下の情報をJSON形式のみで返答してください（前置き・説明文・コードブロック不要）:
 {{
   "title": "タイトル（正式名称）",
   "url": "シナリオ配布・販売ページのURL（BOOTH / DLsite / itch.io / 公式サイト など）",
   "image": "トレーラー画像またはシナリオ表紙画像のURL（見つからない場合はnull）",
-  "description": "シナリオの短い説明（1〜2文）"
+  "description": "シナリオの短い説明（1〜2文、日本語で）"
 }}
 """
 
-    response = await openai_client.responses.create(
-        model="gpt-4o",
-        tools=[{"type": "web_search_preview"}],  # Web検索ツールを有効化
-        input=prompt,
+    response = anthropic_client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        tools=[
+            {
+                "type": "web_search_20250305",  # Claude Web検索ツール
+                "name": "web_search",
+            }
+        ],
+        messages=[{"role": "user", "content": prompt}],
     )
 
-    # レスポンスからテキスト部分を抽出
+    # レスポンスからテキストブロックを抽出
     result_text = ""
-    for item in response.output:
-        if hasattr(item, "content"):
-            for block in item.content:
-                if hasattr(block, "text"):
-                    result_text += block.text
+    for block in response.content:
+        if hasattr(block, "text"):
+            result_text += block.text
 
-    # JSONパース
-    import json, re
+    # JSONパース（コードブロックが含まれる場合も考慮）
     match = re.search(r"\{.*\}", result_text, re.DOTALL)
     if match:
-        return json.loads(match.group())
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
 
     # パース失敗時のフォールバック
     return {
@@ -90,7 +98,7 @@ async def post_result(channel: discord.TextChannel, info: dict) -> None:
 
     embed = discord.Embed(
         title=info.get("title", "不明"),
-        url=info.get("url") or discord.Embed.Empty,
+        url=info.get("url") or None,
         description=info.get("description", ""),
         color=0x7B68EE,  # ミディアムスレートブルー
     )
@@ -103,7 +111,7 @@ async def post_result(channel: discord.TextChannel, info: dict) -> None:
     else:
         embed.add_field(name="⚠️ 提供元URL", value="見つかりませんでした", inline=False)
 
-    embed.set_footer(text="Powered by OpenAI web_search_preview")
+    embed.set_footer(text="Powered by Claude Sonnet 4.6 + Web Search")
 
     await channel.send(embed=embed)
 
@@ -139,10 +147,12 @@ async def on_message(message: discord.Message):
 
     for title in titles:
         try:
-            info = await search_scenario_info(title)
+            # anthropicは同期クライアントのため、スレッドで実行してブロッキングを回避
+            loop = asyncio.get_event_loop()
+            info = await loop.run_in_executor(None, search_scenario_info, title)
             await post_result(output_channel, info)
             # API負荷軽減のため少し待機
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2.0)
         except Exception as e:
             print(f"[ERROR] '{title}' の処理中にエラー: {e}")
             await output_channel.send(f"⚠️ `{title}` の情報取得に失敗しました: {e}")
