@@ -155,7 +155,7 @@ async def on_message(message: discord.Message):
             await asyncio.sleep(2.0)
         except Exception as e:
             print(f"[ERROR] '{title}' の処理中にエラー: {e}")
-            await output_channel.send(f"⚠️ `{title}` の情報取得に失敗しました: {e}")
+            await output_channel.send(f"⚠️ {title}：検索失敗")
 
     # 処理完了をリアクションで通知
     await message.add_reaction("✅")
