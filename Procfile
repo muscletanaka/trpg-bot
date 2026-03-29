@@ -1,0 +1,1 @@
+worker: python trpg_bot_core.py
